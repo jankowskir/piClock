@@ -7,16 +7,26 @@
 #include <mcp23017.h>
 #include <softPwm.h>
 #include <stdio.h>
+#include <fstream>
+#include <thread>
 
 using namespace std;
 
-int minBrightness = 5; //PWM Display Minimum Duty Cycle
+int minBrightness = 1; //PWM Display Minimum Duty Cycle
+int midBrightness = 50; //PWM Display Half Duty Cycle
 int maxBrightness = 100; //PWM Display Maximum Duty Cycle
+int brightnessCount = 0;
 int Min = 0; //Minute
 int PriorMin = 99; //Default minute to force update on start
 int Hour = 0; // Hour
 int PriorHour = 99; //Default hour to force update on start
 int PWM_pin = 1; //PWM Display pin number
+int Separator = 0; //Separator state
+int SeparatorCount = 0; //Count to blink the separator
+string brightness;
+//string newBrightness;
+string oldBrightness;
+
 
 // Inverse 7-segment display digits
 int num_array[10][7] = {  { 0,0,0,0,0,0,1 },    // 0
@@ -41,6 +51,20 @@ int digitFour[7] = {154,148,155,152,153,149,150};
 tm chronoTPtoTM(const chrono::system_clock::time_point& tp) {
     time_t aux = std::chrono::system_clock::to_time_t(tp);
     return *localtime(&aux);
+}
+
+void blinkSeparator(){
+	if (SeparatorCount >= 8){
+		if (Separator == 0){
+			Separator = 1;
+			SeparatorCount = 0;
+		} else {
+			Separator = 0;
+			SeparatorCount = 0;
+		}
+	digitalWrite(101, Separator);
+	}
+SeparatorCount++;
 }
 
 //Get 7-segment settings for the given digit
@@ -101,15 +125,21 @@ void setPins(int digit, int value){
 }
 
 void setTimeHour(int h){
-    PriorHour = h;
-	if (h >= 22 || h < 6){ //Dim the display between 10pm and 6am
+//    PriorHour = h;
+	/*
+    if (h >= 21 || h < 6){ //Dim the display between 10pm and 6am
 		softPwmWrite(PWM_pin, minBrightness);
 	} else { //Normal brightness
 		softPwmWrite(PWM_pin, maxBrightness);
 	}
+    */
+
     if (h > 12){ //Convert to 12 hour
-        h = h - 12;
+      h = h - 12;
 	digitalWrite(125, 0); //turn on the PM indicator
+    } else if (h == 0) {
+        digitalWrite(125, 1); //turn off the PM indicator
+        h = 12;
     } else {
 	digitalWrite(125, 1); //turn off the PM indicator
     }
@@ -125,6 +155,38 @@ void setTimeMin(int m){
     int m2 = m % 10;
     setPins(3, stoi(getDigital(m1))); //Set 1st minute digit on the display
     setPins(4, stoi(getDigital(m2))); //Set 2nd minute digit on the display
+}
+
+void setBrightness(){
+    while (1) {
+//    system("python3 clockbrightness.py");
+    ifstream infile("/tmp/brightness");
+    if (infile.good())
+        {
+            string sLine;
+            getline(infile, sLine);
+    	    brightness=sLine;
+        }
+    infile.close();
+    if (brightness != oldBrightness){
+        if (brightness == "High")
+        {
+            softPwmWrite(PWM_pin, maxBrightness);
+        } else if (brightness == "Med")
+        {
+           softPwmWrite(PWM_pin, midBrightness); 
+        } else if (brightness == "Low")
+        {
+            softPwmWrite(PWM_pin, minBrightness);
+        } else {
+            softPwmWrite(PWM_pin, maxBrightness);
+        }
+        oldBrightness = brightness;
+        }
+//    brightnessCount = 0;
+    sleep(10);
+    }
+//brightnessCount++;
 }
 
 int main() { //Main program execution
@@ -144,7 +206,7 @@ int main() { //Main program execution
     //Set up the PWM display
     softPwmCreate(PWM_pin, maxBrightness, maxBrightness);
     digitalWrite(101, 0); // turn the : on
-
+    thread brightness(setBrightness);
     while (1) {
         chrono::system_clock::time_point t = chrono::system_clock::now();
         tm local_time = chronoTPtoTM(t);
@@ -157,8 +219,10 @@ int main() { //Main program execution
             }
             setTimeMin(local_time.tm_min);
             PriorMin = Min;
-        }
-        usleep(125000); //250000 uSec = 1/8 second
+	}
+	usleep(125000); //250000 uSec = 1/8 second
+//    setBrightness();
+    blinkSeparator();
     }
     return 0;
 }
